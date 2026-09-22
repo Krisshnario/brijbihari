@@ -8,7 +8,6 @@ import {
   query, 
   where, 
   orderBy, 
-  limit, 
   serverTimestamp,
   writeBatch
 } from "firebase/firestore";
@@ -20,8 +19,8 @@ const LOCAL_STORAGE_KEY = "brijbihari_donations_v1";
 const AUDIT_STORAGE_KEY = "brijbihari_audit_logs_v1";
 const COUNTER_STORAGE_KEY = "brijbihari_counter_v1";
 
-// Helper: Timeout race wrapper to prevent network hanging
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number = 2000, fallbackValue: T): Promise<T> {
+// Fast Timeout wrapper (800ms limit to prevent any network/permission hanging)
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number = 800, fallbackValue: T): Promise<T> {
   let timer: NodeJS.Timeout;
   const timeoutPromise = new Promise<T>((resolve) => {
     timer = setTimeout(() => resolve(fallbackValue), timeoutMs);
@@ -30,9 +29,13 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number = 2000, fallbackV
     promise.then((res) => {
       clearTimeout(timer);
       return res;
+    }).catch((err) => {
+      clearTimeout(timer);
+      console.warn("Firestore call skipped (permission or network):", err?.message || err);
+      return fallbackValue;
     }),
     timeoutPromise,
-  ]).catch(() => fallbackValue);
+  ]);
 }
 
 // Authentic realistic sample data for initial setup if empty
@@ -172,7 +175,7 @@ function addLocalAuditLog(log: AuditLog) {
   }
 }
 
-// Next Entry Number Generator (Fast with 1.5s timeout)
+// Next Entry Number Generator (Fast 800ms limit)
 export async function generateNextEntryNumber(): Promise<string> {
   const getNextFromLocal = () => {
     if (typeof window !== "undefined") {
@@ -196,7 +199,7 @@ export async function generateNextEntryNumber(): Promise<string> {
         return `SHIV-${nextNum}`;
       };
 
-      return await withTimeout(fetchCounter(), 1500, getNextFromLocal());
+      return await withTimeout(fetchCounter(), 800, getNextFromLocal());
     } catch {
       return getNextFromLocal();
     }
@@ -205,7 +208,7 @@ export async function generateNextEntryNumber(): Promise<string> {
   return getNextFromLocal();
 }
 
-// Check Duplicate Devotee Mobile (Fast 1.5s timeout, non-blocking)
+// Check Duplicate Devotee Mobile (Fast 800ms limit)
 export async function checkDuplicateMobile(mobile: string): Promise<DonationEntry[]> {
   if (!mobile || mobile.trim() === "") return [];
   const cleanMobile = mobile.trim();
@@ -223,7 +226,7 @@ export async function checkDuplicateMobile(mobile: string): Promise<DonationEntr
         return snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as DonationEntry));
       };
 
-      return await withTimeout(fetchFirestoreDupes(), 1500, getLocalDuplicates());
+      return await withTimeout(fetchFirestoreDupes(), 800, getLocalDuplicates());
     } catch {
       return getLocalDuplicates();
     }
@@ -232,12 +235,12 @@ export async function checkDuplicateMobile(mobile: string): Promise<DonationEntr
   return getLocalDuplicates();
 }
 
-// Add New Donation Entry (OPTIMISTIC INSTANT LOCAL SAVE + BACKGROUND FIRESTORE SYNC)
+// Add New Donation Entry (OPTIMISTIC INSTANT LOCAL SAVE + SAFE BACKGROUND FIRESTORE SYNC)
 export async function addDonationEntry(entryData: Omit<DonationEntry, "id" | "createdAt">): Promise<DonationEntry> {
   const createdAt = new Date().toISOString();
   const numOnly = parseInt(entryData.entryNumber.replace(/\D/g, ""), 10);
 
-  // 1. ALWAYS Save locally first for INSTANT UI response (< 50ms)
+  // 1. ALWAYS Save locally first for INSTANT UI response (< 10ms)
   const all = getLocalDonations();
   const recordId = `record-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
   const newRecord: DonationEntry = {
@@ -253,7 +256,7 @@ export async function addDonationEntry(entryData: Omit<DonationEntry, "id" | "cr
     localStorage.setItem(COUNTER_STORAGE_KEY, numOnly.toString());
   }
 
-  // 2. Sync to Firestore in background without blocking Pandit Ji
+  // 2. Sync to Firestore in background safely
   if (isFirebaseConfigured && db) {
     (async () => {
       try {
@@ -268,7 +271,7 @@ export async function addDonationEntry(entryData: Omit<DonationEntry, "id" | "cr
           await setDoc(doc(db!, "meta", "counters"), { lastEntryNumber: numOnly }, { merge: true });
         }
       } catch (err) {
-        console.warn("Background Firestore sync notice (saved locally):", err);
+        console.warn("Background Firestore sync notice:", err);
       }
     })();
   }
@@ -309,7 +312,7 @@ export async function importBatchDonations(entries: Omit<DonationEntry, "id" | "
           await batch.commit();
         }
       } catch (e) {
-        console.warn("Background batch sync:", e);
+        console.warn("Background batch sync notice:", e);
       }
     })();
   }
@@ -368,7 +371,7 @@ export async function applyCorrection(
           timestamp: serverTimestamp()
         });
       } catch (e) {
-        console.warn("Background correction sync:", e);
+        console.warn("Background correction sync notice:", e);
       }
     })();
   }
@@ -376,7 +379,7 @@ export async function applyCorrection(
   return merged;
 }
 
-// Fetch Dashboard Aggregated Statistics (Fast 2s timeout)
+// Fetch Dashboard Aggregated Statistics (Fast 800ms limit)
 export async function getDashboardStats(): Promise<DashboardStats> {
   let allEntries: DonationEntry[] = getLocalDonations();
 
@@ -390,7 +393,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
         return getLocalDonations();
       };
 
-      allEntries = await withTimeout(fetchStatsFirestore(), 2000, getLocalDonations());
+      allEntries = await withTimeout(fetchStatsFirestore(), 800, getLocalDonations());
     } catch {
       allEntries = getLocalDonations();
     }
@@ -447,7 +450,7 @@ export async function getDonationRecords(options?: {
         return getLocalDonations();
       };
 
-      allEntries = await withTimeout(fetchRecordsFirestore(), 2000, getLocalDonations());
+      allEntries = await withTimeout(fetchRecordsFirestore(), 800, getLocalDonations());
     } catch {
       allEntries = getLocalDonations();
     }
@@ -544,7 +547,7 @@ export async function getAuditLogs(): Promise<AuditLog[]> {
         const snap = await getDocs(query(collection(db!, "auditLogs"), orderBy("timestamp", "desc")));
         return snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any as AuditLog));
       };
-      return await withTimeout(fetchAuditFirestore(), 2000, getLocalAuditLogs());
+      return await withTimeout(fetchAuditFirestore(), 800, getLocalAuditLogs());
     } catch {
       return getLocalAuditLogs();
     }
