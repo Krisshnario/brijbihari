@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    background-color: #FAF7F2;
+    color: #1C1917;
+    font-family: 'Noto Sans Devanagari', 'Inter', -apple-system, sans-serif;
+    font-feature-settings: "tnum" 1, "cv05" 1;
+  }
+
+  /* Keep headings clean Devanagari */
+  h1, h2, h3, h4 {
+    font-family: 'Noto Sans Devanagari', 'Inter', sans-serif;
+    letter-spacing: -0.01em;
+  }
+
+  /* Ultra-clean numeric typography without heavy serifs or decorative designs */
+  .font-serif {
+    font-family: 'Noto Sans Devanagari', 'Inter', sans-serif;
+  }
+
+  .number-clean {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-feature-settings: "tnum" 1, "lnum" 1;
+    letter-spacing: -0.02em;
+  }
+}
+
+/* Custom Clean Scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: #F5EFE6;
+}
+::-webkit-scrollbar-thumb {
+  background: #D84315;
+  border-radius: 4px;
+}
+
+/* Print Specific Media Styles */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .print\:hidden {
+    display: none !important;
+  }
+  body {
+    background: #ffffff !important;
+  }
+}
