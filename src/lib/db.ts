@@ -9,7 +9,6 @@ import {
   where, 
   orderBy, 
   limit, 
-  startAfter,
   serverTimestamp,
   writeBatch
 } from "firebase/firestore";
@@ -20,6 +19,21 @@ const TARGET_SHIVLINGS = 51000;
 const LOCAL_STORAGE_KEY = "brijbihari_donations_v1";
 const AUDIT_STORAGE_KEY = "brijbihari_audit_logs_v1";
 const COUNTER_STORAGE_KEY = "brijbihari_counter_v1";
+
+// Helper: Timeout race wrapper to prevent network hanging
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number = 2000, fallbackValue: T): Promise<T> {
+  let timer: NodeJS.Timeout;
+  const timeoutPromise = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallbackValue), timeoutMs);
+  });
+  return Promise.race([
+    promise.then((res) => {
+      clearTimeout(timer);
+      return res;
+    }),
+    timeoutPromise,
+  ]).catch(() => fallbackValue);
+}
 
 // Authentic realistic sample data for initial setup if empty
 const INITIAL_SAMPLE_DONATIONS: DonationEntry[] = [
@@ -158,94 +172,105 @@ function addLocalAuditLog(log: AuditLog) {
   }
 }
 
-// Next Entry Number Generator
+// Next Entry Number Generator (Fast with 1.5s timeout)
 export async function generateNextEntryNumber(): Promise<string> {
+  const getNextFromLocal = () => {
+    if (typeof window !== "undefined") {
+      const current = parseInt(localStorage.getItem(COUNTER_STORAGE_KEY) || "10006", 10);
+      const next = current + 1;
+      localStorage.setItem(COUNTER_STORAGE_KEY, next.toString());
+      return `SHIV-${next}`;
+    }
+    return `SHIV-10007`;
+  };
+
   if (isFirebaseConfigured && db) {
     try {
-      const counterRef = doc(db!, "meta", "counters");
-      const snap = await getDoc(counterRef);
-      let nextNum = 10001;
-      if (snap.exists()) {
-        nextNum = (snap.data().lastEntryNumber || 10000) + 1;
-      }
-      return `SHIV-${nextNum}`;
+      const fetchCounter = async () => {
+        const counterRef = doc(db!, "meta", "counters");
+        const snap = await getDoc(counterRef);
+        let nextNum = 10001;
+        if (snap.exists()) {
+          nextNum = (snap.data().lastEntryNumber || 10000) + 1;
+        }
+        return `SHIV-${nextNum}`;
+      };
+
+      return await withTimeout(fetchCounter(), 1500, getNextFromLocal());
     } catch {
-      // Fallback
+      return getNextFromLocal();
     }
   }
 
-  // Local fallback
-  if (typeof window !== "undefined") {
-    const current = parseInt(localStorage.getItem(COUNTER_STORAGE_KEY) || "10006", 10);
-    const next = current + 1;
-    localStorage.setItem(COUNTER_STORAGE_KEY, next.toString());
-    return `SHIV-${next}`;
-  }
-  return `SHIV-10007`;
+  return getNextFromLocal();
 }
 
-// Check Duplicate Devotee Mobile
+// Check Duplicate Devotee Mobile (Fast 1.5s timeout, non-blocking)
 export async function checkDuplicateMobile(mobile: string): Promise<DonationEntry[]> {
   if (!mobile || mobile.trim() === "") return [];
   const cleanMobile = mobile.trim();
 
-  if (isFirebaseConfigured && db) {
-    try {
-      const q = query(collection(db!, "donations"), where("mobile", "==", cleanMobile));
-      const snap = await getDocs(q);
-      return snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as DonationEntry));
-    } catch {
-      // Fallback
-    }
-  }
-
-  const all = getLocalDonations();
-  return all.filter(d => d.mobile && d.mobile.trim() === cleanMobile);
-}
-
-// Add New Donation Entry
-export async function addDonationEntry(entryData: Omit<DonationEntry, "id" | "createdAt">): Promise<DonationEntry> {
-  const createdAt = new Date().toISOString();
+  const getLocalDuplicates = () => {
+    const all = getLocalDonations();
+    return all.filter(d => d.mobile && d.mobile.trim() === cleanMobile);
+  };
 
   if (isFirebaseConfigured && db) {
     try {
-      const docRef = doc(collection(db!, "donations"));
-      const newRecord: DonationEntry = {
-        ...entryData,
-        id: docRef.id,
-        createdAt,
+      const fetchFirestoreDupes = async () => {
+        const q = query(collection(db!, "donations"), where("mobile", "==", cleanMobile));
+        const snap = await getDocs(q);
+        return snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as DonationEntry));
       };
 
-      await setDoc(docRef, {
-        ...newRecord,
-        createdAt: serverTimestamp(),
-      });
-
-      // Update counter doc
-      const numOnly = parseInt(entryData.entryNumber.replace(/\D/g, ""), 10);
-      if (!isNaN(numOnly)) {
-        await setDoc(doc(db!, "meta", "counters"), { lastEntryNumber: numOnly }, { merge: true });
-      }
-
-      return newRecord;
-    } catch (err) {
-      console.error("Firestore add error, falling back to local:", err);
+      return await withTimeout(fetchFirestoreDupes(), 1500, getLocalDuplicates());
+    } catch {
+      return getLocalDuplicates();
     }
   }
 
-  // Local Storage Fallback
+  return getLocalDuplicates();
+}
+
+// Add New Donation Entry (OPTIMISTIC INSTANT LOCAL SAVE + BACKGROUND FIRESTORE SYNC)
+export async function addDonationEntry(entryData: Omit<DonationEntry, "id" | "createdAt">): Promise<DonationEntry> {
+  const createdAt = new Date().toISOString();
+  const numOnly = parseInt(entryData.entryNumber.replace(/\D/g, ""), 10);
+
+  // 1. ALWAYS Save locally first for INSTANT UI response (< 50ms)
   const all = getLocalDonations();
+  const recordId = `record-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
   const newRecord: DonationEntry = {
     ...entryData,
-    id: `local-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+    id: recordId,
     createdAt,
   };
+
   all.unshift(newRecord);
   setLocalDonations(all);
 
-  const numOnly = parseInt(entryData.entryNumber.replace(/\D/g, ""), 10);
   if (!isNaN(numOnly) && typeof window !== "undefined") {
     localStorage.setItem(COUNTER_STORAGE_KEY, numOnly.toString());
+  }
+
+  // 2. Sync to Firestore in background without blocking Pandit Ji
+  if (isFirebaseConfigured && db) {
+    (async () => {
+      try {
+        const docRef = doc(collection(db!, "donations"));
+        await setDoc(docRef, {
+          ...newRecord,
+          id: docRef.id,
+          createdAt: serverTimestamp(),
+        });
+
+        if (!isNaN(numOnly)) {
+          await setDoc(doc(db!, "meta", "counters"), { lastEntryNumber: numOnly }, { merge: true });
+        }
+      } catch (err) {
+        console.warn("Background Firestore sync notice (saved locally):", err);
+      }
+    })();
   }
 
   return newRecord;
@@ -255,38 +280,6 @@ export async function addDonationEntry(entryData: Omit<DonationEntry, "id" | "cr
 export async function importBatchDonations(entries: Omit<DonationEntry, "id" | "createdAt">[]): Promise<{ successCount: number; failedCount: number }> {
   if (entries.length === 0) return { successCount: 0, failedCount: 0 };
 
-  let successCount = 0;
-  let failedCount = 0;
-
-  if (isFirebaseConfigured && db) {
-    try {
-      // Firestore batch size limit is 500
-      const BATCH_SIZE = 400;
-      for (let i = 0; i < entries.length; i += BATCH_SIZE) {
-        const chunk = entries.slice(i, i + BATCH_SIZE);
-        const batch = writeBatch(db!);
-        const now = new Date().toISOString();
-
-        chunk.forEach(item => {
-          const docRef = doc(collection(db!, "donations"));
-          batch.set(docRef, {
-            ...item,
-            id: docRef.id,
-            createdAt: now
-          });
-        });
-
-        await batch.commit();
-        successCount += chunk.length;
-      }
-
-      return { successCount, failedCount: 0 };
-    } catch (e) {
-      console.error("Batch import error in Firestore, resorting to local batch:", e);
-    }
-  }
-
-  // Local fallback
   const existing = getLocalDonations();
   const formatted: DonationEntry[] = entries.map((item, idx) => ({
     ...item,
@@ -295,6 +288,32 @@ export async function importBatchDonations(entries: Omit<DonationEntry, "id" | "
   }));
 
   setLocalDonations([...formatted, ...existing]);
+
+  if (isFirebaseConfigured && db) {
+    (async () => {
+      try {
+        const BATCH_SIZE = 400;
+        for (let i = 0; i < formatted.length; i += BATCH_SIZE) {
+          const chunk = formatted.slice(i, i + BATCH_SIZE);
+          const batch = writeBatch(db!);
+
+          chunk.forEach(item => {
+            const docRef = doc(collection(db!, "donations"));
+            batch.set(docRef, {
+              ...item,
+              id: docRef.id,
+              createdAt: item.createdAt
+            });
+          });
+
+          await batch.commit();
+        }
+      } catch (e) {
+        console.warn("Background batch sync:", e);
+      }
+    })();
+  }
+
   return { successCount: formatted.length, failedCount: 0 };
 }
 
@@ -306,44 +325,7 @@ export async function applyCorrection(
 ): Promise<DonationEntry> {
   const timestamp = new Date().toISOString();
 
-  if (isFirebaseConfigured && db) {
-    try {
-      const docRef = doc(db!, "donations", donationId);
-      const snap = await getDoc(docRef);
-      if (!snap.exists()) throw new Error("Record not found");
-
-      const originalData = snap.data() as DonationEntry;
-      const merged: DonationEntry = {
-        ...originalData,
-        ...updatedData,
-        updatedAt: timestamp
-      };
-
-      await updateDoc(docRef, {
-        ...updatedData,
-        updatedAt: serverTimestamp()
-      });
-
-      // Write Audit Log
-      const auditRef = doc(collection(db!, "auditLogs"));
-      const auditRecord: AuditLog = {
-        id: auditRef.id,
-        donationId,
-        entryNumber: originalData.entryNumber,
-        originalData,
-        updatedData,
-        reason,
-        timestamp
-      };
-      await setDoc(auditRef, auditRecord);
-
-      return merged;
-    } catch (e) {
-      console.error("Correction Firestore error, using fallback:", e);
-    }
-  }
-
-  // Local Fallback
+  // Local update first
   const all = getLocalDonations();
   const index = all.findIndex(d => d.id === donationId);
   if (index === -1) throw new Error("Record not found");
@@ -369,22 +351,49 @@ export async function applyCorrection(
   };
   addLocalAuditLog(auditRecord);
 
+  // Sync to Firestore in background
+  if (isFirebaseConfigured && db) {
+    (async () => {
+      try {
+        const docRef = doc(db!, "donations", donationId);
+        await updateDoc(docRef, {
+          ...updatedData,
+          updatedAt: serverTimestamp()
+        });
+
+        const auditRef = doc(collection(db!, "auditLogs"));
+        await setDoc(auditRef, {
+          ...auditRecord,
+          id: auditRef.id,
+          timestamp: serverTimestamp()
+        });
+      } catch (e) {
+        console.warn("Background correction sync:", e);
+      }
+    })();
+  }
+
   return merged;
 }
 
-// Fetch Dashboard Aggregated Statistics
+// Fetch Dashboard Aggregated Statistics (Fast 2s timeout)
 export async function getDashboardStats(): Promise<DashboardStats> {
-  let allEntries: DonationEntry[] = [];
+  let allEntries: DonationEntry[] = getLocalDonations();
 
   if (isFirebaseConfigured && db) {
     try {
-      const snap = await getDocs(collection(db!, "donations"));
-      allEntries = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as DonationEntry));
+      const fetchStatsFirestore = async () => {
+        const snap = await getDocs(collection(db!, "donations"));
+        if (!snap.empty) {
+          return snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as DonationEntry));
+        }
+        return getLocalDonations();
+      };
+
+      allEntries = await withTimeout(fetchStatsFirestore(), 2000, getLocalDonations());
     } catch {
       allEntries = getLocalDonations();
     }
-  } else {
-    allEntries = getLocalDonations();
   }
 
   let registeredShivlings = 0;
@@ -426,17 +435,22 @@ export async function getDonationRecords(options?: {
   page?: number;
   pageSize?: number;
 }): Promise<{ data: DonationEntry[]; totalCount: number; totalPages: number }> {
-  let allEntries: DonationEntry[] = [];
+  let allEntries: DonationEntry[] = getLocalDonations();
 
   if (isFirebaseConfigured && db) {
     try {
-      const snap = await getDocs(collection(db!, "donations"));
-      allEntries = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as DonationEntry));
+      const fetchRecordsFirestore = async () => {
+        const snap = await getDocs(collection(db!, "donations"));
+        if (!snap.empty) {
+          return snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as DonationEntry));
+        }
+        return getLocalDonations();
+      };
+
+      allEntries = await withTimeout(fetchRecordsFirestore(), 2000, getLocalDonations());
     } catch {
       allEntries = getLocalDonations();
     }
-  } else {
-    allEntries = getLocalDonations();
   }
 
   const queryStr = (options?.searchQuery || "").trim().toLowerCase();
@@ -444,11 +458,9 @@ export async function getDonationRecords(options?: {
 
   // Filter
   let filtered = allEntries.filter(entry => {
-    // Status filter
     if (statusFilter !== "ALL" && entry.paymentStatus !== statusFilter) {
       return false;
     }
-    // Search query
     if (queryStr) {
       const nameMatch = entry.devoteeName?.toLowerCase().includes(queryStr);
       const mobileMatch = entry.mobile?.includes(queryStr);
@@ -528,8 +540,11 @@ export async function getDevoteesList(): Promise<DevoteeSummary[]> {
 export async function getAuditLogs(): Promise<AuditLog[]> {
   if (isFirebaseConfigured && db) {
     try {
-      const snap = await getDocs(query(collection(db!, "auditLogs"), orderBy("timestamp", "desc")));
-      return snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as DonationEntry as any as AuditLog));
+      const fetchAuditFirestore = async () => {
+        const snap = await getDocs(query(collection(db!, "auditLogs"), orderBy("timestamp", "desc")));
+        return snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any as AuditLog));
+      };
+      return await withTimeout(fetchAuditFirestore(), 2000, getLocalAuditLogs());
     } catch {
       return getLocalAuditLogs();
     }
