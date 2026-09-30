@@ -41,10 +41,10 @@ export const Header: React.FC<Props> = ({ onOpenAddModal, onNavigate, activeTab 
               <h1 className="text-base sm:text-xl font-bold tracking-tight text-white truncate leading-tight">
                 बृजविहारी गौ तीर्थ धाम
               </h1>
-              <p className="text-[11px] sm:text-xs text-[#FDE68A] font-medium flex items-center gap-1 truncate">
+              <div className="text-[11px] sm:text-xs text-[#FDE68A] font-medium flex items-center gap-1 truncate">
                 <ShivlingIcon className="w-3.5 h-3.5 shrink-0 text-[#FDE68A]" />
                 <span className="font-semibold">51,000 शिवलिंग निर्माण</span>
-              </p>
+              </div>
             </div>
           </div>
 
