@@ -20,7 +20,11 @@ import {
   DashboardStats, 
   PaymentStatus,
   EventItem,
-  EventStatus
+  EventStatus,
+  AshramDaanEntry,
+  AshramDaanPurpose,
+  PaymentMode,
+  AshramDaanStats
 } from "@/types";
 
 const TARGET_SHIVLINGS = 51000;
@@ -28,6 +32,9 @@ const LOCAL_STORAGE_KEY = "brijbihari_donations_v1";
 const AUDIT_STORAGE_KEY = "brijbihari_audit_logs_v1";
 const COUNTER_STORAGE_KEY = "brijbihari_counter_v1";
 const EVENTS_STORAGE_KEY = "brijbihari_events_v1";
+const ASHRAM_STORAGE_KEY = "brijbihari_ashram_daan_v1";
+const ASHRAM_COUNTER_KEY = "brijbihari_ashram_counter_v1";
+
 
 
 // Fast Timeout wrapper (800ms limit to prevent any network/permission hanging)
@@ -814,4 +821,331 @@ export async function deleteEvent(eventId: string): Promise<boolean> {
 
   return true;
 }
+
+// -------------------------------------------------------------
+// ASHRAM DAAN / GENERAL DONATION MODULE
+// -------------------------------------------------------------
+
+const INITIAL_SAMPLE_ASHRAM_DAAN: AshramDaanEntry[] = [
+  {
+    id: "ash-10001",
+    receiptNumber: "ASH-10001",
+    donorName: "श्री श्याम सुंदर बिड़ला",
+    mobile: "9826012345",
+    address: "भोपाल, मध्य प्रदेश",
+    city: "भोपाल",
+    amount: 21000,
+    purpose: "गौ सेवा",
+    paymentMode: "ऑनलाइन / UPI",
+    paymentStatus: "जमा",
+    transactionId: "UPI/329482910382",
+    daanDate: "2026-09-24",
+    notes: "वार्षिक गौ ग्रास एवं हरा चारा सेवा",
+    receivedBy: "कार्यालय",
+    createdAt: new Date("2026-09-24T10:00:00Z").toISOString(),
+  },
+  {
+    id: "ash-10002",
+    receiptNumber: "ASH-10002",
+    donorName: "श्रीमती कौशल्या देवी माहेश्वरी",
+    mobile: "9425098765",
+    address: "इंदौर, मध्य प्रदेश",
+    city: "इंदौर",
+    amount: 11000,
+    purpose: "अन्नक्षेत्र / भण्डारा",
+    paymentMode: "नकद (Cash)",
+    paymentStatus: "जमा",
+    daanDate: "2026-09-25",
+    notes: "पूर्णमासी साधु-संत महाप्रसाद भण्डारा",
+    receivedBy: "कार्यालय",
+    createdAt: new Date("2026-09-25T11:30:00Z").toISOString(),
+  },
+  {
+    id: "ash-10003",
+    receiptNumber: "ASH-10003",
+    donorName: "श्री मदन लाल जालान",
+    mobile: "9893044556",
+    address: "उज्जैन, मध्य प्रदेश",
+    city: "उज्जैन",
+    amount: 51000,
+    purpose: "आश्रम निर्माण",
+    paymentMode: "बैंक ट्रांसफर (NEFT)",
+    paymentStatus: "जमा",
+    transactionId: "NEFT/SBIN29384729",
+    daanDate: "2026-09-26",
+    notes: "मुख्य यज्ञशाला विस्तार निर्माण सहयोग",
+    receivedBy: "कार्यालय",
+    createdAt: new Date("2026-09-26T14:15:00Z").toISOString(),
+  },
+  {
+    id: "ash-10004",
+    receiptNumber: "ASH-10004",
+    donorName: "श्री विजय कुमार सोनी",
+    mobile: "9712033445",
+    address: "अहमदाबाद, गुजरात",
+    city: "अहमदाबाद",
+    amount: 5100,
+    purpose: "संत / अतिथि सेवा",
+    paymentMode: "ऑनलाइन / UPI",
+    paymentStatus: "जमा",
+    transactionId: "UPI/329482910999",
+    daanDate: "2026-09-27",
+    notes: "आगंतुक संतों की सेवा व सत्कार",
+    receivedBy: "कार्यालय",
+    createdAt: new Date("2026-09-27T16:00:00Z").toISOString(),
+  },
+  {
+    id: "ash-10005",
+    receiptNumber: "ASH-10005",
+    donorName: "गुप्त दानदाता",
+    mobile: "9810066778",
+    address: "वृंदावन, उत्तर प्रदेश",
+    city: "वृंदावन",
+    amount: 2100,
+    purpose: "दीपदान / पूजा उत्सव",
+    paymentMode: "नकद (Cash)",
+    paymentStatus: "जमा",
+    daanDate: "2026-09-28",
+    notes: "कार्तिक मास संध्या दीपदान एवं महाआरती",
+    receivedBy: "कार्यालय",
+    createdAt: new Date("2026-09-28T17:45:00Z").toISOString(),
+  }
+];
+
+export function getLocalAshramDonations(): AshramDaanEntry[] {
+  if (typeof window === "undefined") return INITIAL_SAMPLE_ASHRAM_DAAN;
+  try {
+    const data = localStorage.getItem(ASHRAM_STORAGE_KEY);
+    if (!data) {
+      localStorage.setItem(ASHRAM_STORAGE_KEY, JSON.stringify(INITIAL_SAMPLE_ASHRAM_DAAN));
+      localStorage.setItem(ASHRAM_COUNTER_KEY, "10005");
+      return INITIAL_SAMPLE_ASHRAM_DAAN;
+    }
+    return JSON.parse(data);
+  } catch {
+    return INITIAL_SAMPLE_ASHRAM_DAAN;
+  }
+}
+
+export function setLocalAshramDonations(donations: AshramDaanEntry[]) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(ASHRAM_STORAGE_KEY, JSON.stringify(donations));
+  } catch (e) {
+    console.error("Local ashram donations error:", e);
+  }
+}
+
+export async function generateNextAshramReceiptNumber(): Promise<string> {
+  const getNextFromLocal = () => {
+    if (typeof window !== "undefined") {
+      const current = parseInt(localStorage.getItem(ASHRAM_COUNTER_KEY) || "10005", 10);
+      const next = current + 1;
+      localStorage.setItem(ASHRAM_COUNTER_KEY, next.toString());
+      return `ASH-${next}`;
+    }
+    return `ASH-10006`;
+  };
+
+  if (isFirebaseConfigured && db) {
+    try {
+      const fetchCounter = async () => {
+        const counterRef = doc(db!, "meta", "counters");
+        const snap = await getDoc(counterRef);
+        let nextNum = 10001;
+        if (snap.exists() && snap.data().lastAshramReceiptNumber) {
+          nextNum = (snap.data().lastAshramReceiptNumber || 10000) + 1;
+        } else {
+          return getNextFromLocal();
+        }
+        return `ASH-${nextNum}`;
+      };
+      return await withTimeout(fetchCounter(), 800, getNextFromLocal());
+    } catch {
+      return getNextFromLocal();
+    }
+  }
+
+  return getNextFromLocal();
+}
+
+export async function getAshramDonations(options?: {
+  searchQuery?: string;
+  purpose?: string;
+  paymentMode?: string;
+  paymentStatus?: string;
+}): Promise<AshramDaanEntry[]> {
+  let all = getLocalAshramDonations();
+
+  if (isFirebaseConfigured && db) {
+    try {
+      const fetchFirestore = async () => {
+        const snap = await getDocs(collection(db!, "ashramDonations"));
+        if (!snap.empty) {
+          const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as AshramDaanEntry));
+          setLocalAshramDonations(list);
+          return list;
+        }
+        return getLocalAshramDonations();
+      };
+      all = await withTimeout(fetchFirestore(), 800, getLocalAshramDonations());
+    } catch {
+      all = getLocalAshramDonations();
+    }
+  }
+
+  const queryStr = (options?.searchQuery || "").trim().toLowerCase();
+  const purposeFilter = options?.purpose || "ALL";
+  const modeFilter = options?.paymentMode || "ALL";
+  const statusFilter = options?.paymentStatus || "ALL";
+
+  const filtered = all.filter(entry => {
+    if (purposeFilter !== "ALL" && entry.purpose !== purposeFilter) return false;
+    if (modeFilter !== "ALL" && entry.paymentMode !== modeFilter) return false;
+    if (statusFilter !== "ALL" && entry.paymentStatus !== statusFilter) return false;
+    if (queryStr) {
+      const nameMatch = entry.donorName?.toLowerCase().includes(queryStr);
+      const mobileMatch = entry.mobile?.includes(queryStr);
+      const receiptMatch = entry.receiptNumber?.toLowerCase().includes(queryStr);
+      const cityMatch = entry.city?.toLowerCase().includes(queryStr);
+      const notesMatch = entry.notes?.toLowerCase().includes(queryStr);
+      return nameMatch || mobileMatch || receiptMatch || cityMatch || notesMatch;
+    }
+    return true;
+  });
+
+  return filtered.sort((a, b) => new Date(b.daanDate || b.createdAt).getTime() - new Date(a.daanDate || a.createdAt).getTime());
+}
+
+export async function addAshramDonation(entryData: Omit<AshramDaanEntry, "id" | "createdAt">): Promise<AshramDaanEntry> {
+  const createdAt = new Date().toISOString();
+  const numOnly = parseInt(entryData.receiptNumber.replace(/\D/g, ""), 10);
+
+  const all = getLocalAshramDonations();
+  const id = `ashram-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+  const newRecord: AshramDaanEntry = {
+    ...entryData,
+    id,
+    createdAt,
+  };
+
+  all.unshift(newRecord);
+  setLocalAshramDonations(all);
+
+  if (!isNaN(numOnly) && typeof window !== "undefined") {
+    localStorage.setItem(ASHRAM_COUNTER_KEY, numOnly.toString());
+  }
+
+  // Background Firestore Sync
+  if (isFirebaseConfigured && db) {
+    (async () => {
+      try {
+        const docRef = doc(collection(db!, "ashramDonations"));
+        await setDoc(docRef, {
+          ...newRecord,
+          id: docRef.id,
+          createdAt: serverTimestamp(),
+        });
+        if (!isNaN(numOnly)) {
+          await setDoc(doc(db!, "meta", "counters"), { lastAshramReceiptNumber: numOnly }, { merge: true });
+        }
+      } catch (err) {
+        console.warn("Background Ashram donation sync notice:", err);
+      }
+    })();
+  }
+
+  return newRecord;
+}
+
+export async function updateAshramDonation(id: string, updatedData: Partial<AshramDaanEntry>): Promise<AshramDaanEntry> {
+  const timestamp = new Date().toISOString();
+  const all = getLocalAshramDonations();
+  const index = all.findIndex(d => d.id === id);
+  if (index === -1) throw new Error("Ashram donation record not found");
+
+  const merged: AshramDaanEntry = {
+    ...all[index],
+    ...updatedData,
+    updatedAt: timestamp,
+  };
+
+  all[index] = merged;
+  setLocalAshramDonations(all);
+
+  if (isFirebaseConfigured && db) {
+    (async () => {
+      try {
+        const docRef = doc(db!, "ashramDonations", id);
+        await updateDoc(docRef, {
+          ...updatedData,
+          updatedAt: serverTimestamp(),
+        });
+      } catch (e) {
+        console.warn("Background Ashram update notice:", e);
+      }
+    })();
+  }
+
+  return merged;
+}
+
+export async function deleteAshramDonation(id: string): Promise<boolean> {
+  const all = getLocalAshramDonations();
+  const filtered = all.filter(d => d.id !== id);
+  setLocalAshramDonations(filtered);
+
+  if (isFirebaseConfigured && db) {
+    (async () => {
+      try {
+        const docRef = doc(db!, "ashramDonations", id);
+        await deleteDoc(docRef);
+      } catch (e) {
+        console.warn("Background Ashram delete notice:", e);
+      }
+    })();
+  }
+
+  return true;
+}
+
+export async function getAshramDaanStats(): Promise<AshramDaanStats> {
+  const all = await getAshramDonations();
+  
+  let totalAmount = 0;
+  let gauSevaAmount = 0;
+  let annakshetraAmount = 0;
+  let constructionAmount = 0;
+  let santSevaAmount = 0;
+  let otherAmount = 0;
+  let cashAmount = 0;
+  let onlineAmount = 0;
+
+  all.forEach(item => {
+    const amt = Number(item.amount) || 0;
+    totalAmount += amt;
+
+    if (item.purpose === "गौ सेवा") gauSevaAmount += amt;
+    else if (item.purpose === "अन्नक्षेत्र / भण्डारा") annakshetraAmount += amt;
+    else if (item.purpose === "आश्रम निर्माण") constructionAmount += amt;
+    else if (item.purpose === "संत / अतिथि सेवा") santSevaAmount += amt;
+    else otherAmount += amt;
+
+    if (item.paymentMode?.includes("नकद")) cashAmount += amt;
+    else onlineAmount += amt;
+  });
+
+  return {
+    totalAmount,
+    totalReceipts: all.length,
+    gauSevaAmount,
+    annakshetraAmount,
+    constructionAmount,
+    santSevaAmount,
+    otherAmount,
+    cashAmount,
+    onlineAmount,
+  };
+}
+
 

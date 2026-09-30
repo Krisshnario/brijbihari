@@ -15,6 +15,9 @@ service cloud.firestore {
     match /events/{eventId} {
       allow read, write: if true;
     }
+    match /ashramDonations/{donationId} {
+      allow read, write: if true;
+    }
     match /meta/{metaId} {
       allow read, write: if true;
     }

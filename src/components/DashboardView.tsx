@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { DashboardStats, DonationEntry, EventItem } from "@/types";
+import { DashboardStats, DonationEntry, EventItem, AshramDaanStats } from "@/types";
 import { computeEventStatus } from "@/lib/db";
 import { ShivlingIcon } from "./icons/ShivlingIcon";
 import { GauMataLogo } from "./icons/GauMataLogo";
@@ -16,13 +16,15 @@ import {
   FileText,
   CalendarDays,
   Calendar,
-  MapPin
+  MapPin,
+  HeartHandshake
 } from "lucide-react";
 
 interface Props {
   stats: DashboardStats;
   recentEntries: DonationEntry[];
   events?: EventItem[];
+  ashramStats?: AshramDaanStats;
   onOpenAddModal: () => void;
   onNavigate: (tab: string) => void;
   onSelectEntry: (entry: DonationEntry) => void;
@@ -33,10 +35,12 @@ export const DashboardView: React.FC<Props> = ({
   stats,
   recentEntries,
   events = [],
+  ashramStats,
   onOpenAddModal,
   onNavigate,
   onSelectEntry
 }) => {
+
   const percentComplete = Math.min(
     100,
     ((stats.registeredShivlings / stats.targetShivlings) * 100)
@@ -319,8 +323,65 @@ export const DashboardView: React.FC<Props> = ({
         )}
       </div>
 
+      {/* ASHRAM DAAN OVERVIEW WIDGET */}
+      {ashramStats && (
+        <div className="bg-white rounded-xl border border-stone-200 shadow-xs overflow-hidden">
+          <div className="p-3.5 sm:px-5 border-b border-stone-200 flex items-center justify-between bg-gradient-to-r from-emerald-50/70 to-[#FFF9F0]">
+            <div className="flex items-center gap-2">
+              <HeartHandshake className="w-4 h-4 text-emerald-700" />
+              <div>
+                <h3 className="text-base font-bold text-stone-900">आश्रम सेवा दान (गौ, अन्नक्षेत्र, निर्माण)</h3>
+                <p className="text-[11px] text-stone-600 hidden sm:block">सामान्य आश्रम दान का सारांश</p>
+              </div>
+            </div>
+            <button
+              onClick={() => onNavigate("ashramDaan")}
+              className="text-xs font-bold text-emerald-800 hover:text-emerald-900 flex items-center gap-1"
+            >
+              <span>आश्रम दान रजिस्टर देखें</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div className="p-3.5 sm:p-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="bg-emerald-50/60 p-3 rounded-lg border border-emerald-200">
+              <span className="text-[10px] font-bold text-emerald-800 uppercase block">कुल आश्रम दान</span>
+              <span className="text-lg sm:text-xl font-extrabold text-emerald-900 number-clean">
+                ₹{ashramStats.totalAmount.toLocaleString('en-IN')}
+              </span>
+              <span className="text-[10px] text-emerald-700 block mt-0.5">{ashramStats.totalReceipts} रसीदें</span>
+            </div>
+
+            <div className="bg-amber-50/60 p-3 rounded-lg border border-amber-200">
+              <span className="text-[10px] font-bold text-[#D84315] uppercase block">गौ सेवा दान</span>
+              <span className="text-lg sm:text-xl font-bold text-[#D84315] number-clean">
+                ₹{ashramStats.gauSevaAmount.toLocaleString('en-IN')}
+              </span>
+              <span className="text-[10px] text-stone-500 block mt-0.5">चारा व औषधि</span>
+            </div>
+
+            <div className="bg-stone-50 p-3 rounded-lg border border-stone-200">
+              <span className="text-[10px] font-bold text-stone-700 uppercase block">अन्नक्षेत्र भण्डारा</span>
+              <span className="text-lg sm:text-xl font-bold text-stone-900 number-clean">
+                ₹{ashramStats.annakshetraAmount.toLocaleString('en-IN')}
+              </span>
+              <span className="text-[10px] text-stone-500 block mt-0.5">साधु-संत सेवा</span>
+            </div>
+
+            <div className="bg-stone-50 p-3 rounded-lg border border-stone-200">
+              <span className="text-[10px] font-bold text-stone-700 uppercase block">आश्रम निर्माण</span>
+              <span className="text-lg sm:text-xl font-bold text-stone-900 number-clean">
+                ₹{ashramStats.constructionAmount.toLocaleString('en-IN')}
+              </span>
+              <span className="text-[10px] text-stone-500 block mt-0.5">धाम विकास</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* RECENT DONATION ENTRIES - Mobile Responsive Card / Table View */}
       <div className="bg-white rounded-xl border border-stone-200 shadow-xs overflow-hidden">
+
 
         <div className="p-3.5 sm:px-5 border-b border-stone-200 flex items-center justify-between bg-[#FAF7F2]">
           <div className="flex items-center gap-2">

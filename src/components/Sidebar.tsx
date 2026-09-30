@@ -9,7 +9,8 @@ import {
   Download, 
   History, 
   PlusCircle,
-  CalendarDays
+  CalendarDays,
+  HeartHandshake
 } from "lucide-react";
 
 interface Props {
@@ -18,6 +19,7 @@ interface Props {
   onOpenAddModal: () => void;
   totalEntriesCount?: number;
   upcomingEventsCount?: number;
+  ashramDaanCount?: number;
 }
 
 export const Sidebar: React.FC<Props> = ({ 
@@ -25,7 +27,8 @@ export const Sidebar: React.FC<Props> = ({
   onNavigate, 
   onOpenAddModal,
   totalEntriesCount = 0,
-  upcomingEventsCount = 0
+  upcomingEventsCount = 0,
+  ashramDaanCount = 0
 }) => {
   const navItems = [
     {
@@ -44,10 +47,18 @@ export const Sidebar: React.FC<Props> = ({
       badge: upcomingEventsCount > 0 ? upcomingEventsCount.toString() : undefined,
     },
     {
+      id: "ashramDaan",
+      label: "आश्रम दान",
+      desktopLabel: "आश्रम सेवा दान",
+      sublabel: "Ashram Donations",
+      icon: HeartHandshake,
+      badge: ashramDaanCount > 0 ? ashramDaanCount.toString() : undefined,
+    },
+    {
       id: "records",
-      label: "रिकॉर्ड",
-      desktopLabel: "दानदाता रिकॉर्ड",
-      sublabel: "Donation Entries",
+      label: "शिवलिंग दान",
+      desktopLabel: "शिवलिंग दान रिकॉर्ड",
+      sublabel: "51,000 Shivlings",
       icon: FileSpreadsheet,
       badge: totalEntriesCount > 0 ? totalEntriesCount.toString() : undefined,
     },

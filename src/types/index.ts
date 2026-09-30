@@ -86,3 +86,54 @@ export interface EventItem {
   updatedAt?: string;
 }
 
+// -------------------------------------------------------------
+// ASHRAM DAAN / GENERAL DONATION TYPES
+// -------------------------------------------------------------
+
+export type AshramDaanPurpose = 
+  | 'गौ सेवा'
+  | 'अन्नक्षेत्र / भण्डारा'
+  | 'आश्रम निर्माण'
+  | 'संत / अतिथि सेवा'
+  | 'दीपदान / पूजा उत्सव'
+  | 'सामान्य दान'
+  | 'अन्य';
+
+export type PaymentMode = 
+  | 'नकद (Cash)' 
+  | 'ऑनलाइन / UPI' 
+  | 'बैंक ट्रांसफर (NEFT)' 
+  | 'चेक (Cheque)';
+
+export interface AshramDaanEntry {
+  id: string;
+  receiptNumber: string; // e.g. "ASH-10001"
+  donorName: string;
+  mobile: string;
+  address?: string;
+  city?: string;
+  amount: number;
+  purpose: AshramDaanPurpose;
+  paymentMode: PaymentMode;
+  paymentStatus: PaymentStatus;
+  transactionId?: string; // UPI ref / cheque number
+  daanDate: string; // YYYY-MM-DD
+  notes?: string;
+  receivedBy?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface AshramDaanStats {
+  totalAmount: number;
+  totalReceipts: number;
+  gauSevaAmount: number;
+  annakshetraAmount: number;
+  constructionAmount: number;
+  santSevaAmount: number;
+  otherAmount: number;
+  cashAmount: number;
+  onlineAmount: number;
+}
+
+

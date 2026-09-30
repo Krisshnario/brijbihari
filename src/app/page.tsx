@@ -10,11 +10,18 @@ import { ExcelImportView } from "@/components/ExcelImportView";
 import { ExportUtility } from "@/components/ExportUtility";
 import { AuditLogView } from "@/components/AuditLogView";
 import { EventsView } from "@/components/EventsView";
+import { AshramDaanView } from "@/components/AshramDaanView";
 import { AddEntryModal } from "@/components/AddEntryModal";
 import { CorrectionModal } from "@/components/CorrectionModal";
 import { ReceiptModal } from "@/components/ReceiptModal";
-import { DashboardStats, DonationEntry, EventItem } from "@/types";
-import { getDashboardStats, getDonationRecords, getEvents, computeEventStatus } from "@/lib/db";
+import { DashboardStats, DonationEntry, EventItem, AshramDaanStats } from "@/types";
+import { 
+  getDashboardStats, 
+  getDonationRecords, 
+  getEvents, 
+  computeEventStatus,
+  getAshramDaanStats 
+} from "@/lib/db";
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<string>("dashboard");
@@ -33,6 +40,17 @@ export default function Home() {
 
   const [recentEntries, setRecentEntries] = useState<DonationEntry[]>([]);
   const [events, setEvents] = useState<EventItem[]>([]);
+  const [ashramStats, setAshramStats] = useState<AshramDaanStats>({
+    totalAmount: 0,
+    totalReceipts: 0,
+    gauSevaAmount: 0,
+    annakshetraAmount: 0,
+    constructionAmount: 0,
+    santSevaAmount: 0,
+    otherAmount: 0,
+    cashAmount: 0,
+    onlineAmount: 0,
+  });
 
   // Modals state
   const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
@@ -40,7 +58,7 @@ export default function Home() {
   const [receiptEntry, setReceiptEntry] = useState<DonationEntry | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState<number>(0);
 
-  // Load stats, recent entries, and events
+  // Load stats, recent entries, events, and ashram daan stats
   const loadDashboardData = async () => {
     try {
       const s = await getDashboardStats();
@@ -51,10 +69,14 @@ export default function Home() {
 
       const evs = await getEvents();
       setEvents(evs);
+
+      const aStats = await getAshramDaanStats();
+      setAshramStats(aStats);
     } catch (err) {
       console.error("Failed to load dashboard data:", err);
     }
   };
+
 
 
   useEffect(() => {
@@ -93,6 +115,7 @@ export default function Home() {
           onOpenAddModal={() => setIsAddModalOpen(true)}
           totalEntriesCount={stats.totalEntries}
           upcomingEventsCount={upcomingEventsCount}
+          ashramDaanCount={ashramStats.totalReceipts}
         />
 
         {/* Dynamic Main View Pane */}
@@ -102,6 +125,7 @@ export default function Home() {
               stats={stats}
               recentEntries={recentEntries}
               events={events}
+              ashramStats={ashramStats}
               onOpenAddModal={() => setIsAddModalOpen(true)}
               onNavigate={(tab) => setActiveTab(tab)}
               onSelectEntry={(entry) => setReceiptEntry(entry)}
@@ -110,6 +134,10 @@ export default function Home() {
 
           {activeTab === "events" && (
             <EventsView onRefreshStats={loadDashboardData} />
+          )}
+
+          {activeTab === "ashramDaan" && (
+            <AshramDaanView onRefreshGlobalStats={loadDashboardData} />
           )}
 
           {activeTab === "records" && (
