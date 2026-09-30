@@ -5,6 +5,7 @@ import {
   getDocs, 
   setDoc, 
   updateDoc, 
+  deleteDoc,
   query, 
   where, 
   orderBy, 
@@ -12,12 +13,22 @@ import {
   writeBatch
 } from "firebase/firestore";
 import { db, isFirebaseConfigured } from "./firebase";
-import { DonationEntry, DevoteeSummary, AuditLog, DashboardStats, PaymentStatus } from "@/types";
+import { 
+  DonationEntry, 
+  DevoteeSummary, 
+  AuditLog, 
+  DashboardStats, 
+  PaymentStatus,
+  EventItem,
+  EventStatus
+} from "@/types";
 
 const TARGET_SHIVLINGS = 51000;
 const LOCAL_STORAGE_KEY = "brijbihari_donations_v1";
 const AUDIT_STORAGE_KEY = "brijbihari_audit_logs_v1";
 const COUNTER_STORAGE_KEY = "brijbihari_counter_v1";
+const EVENTS_STORAGE_KEY = "brijbihari_events_v1";
+
 
 // Fast Timeout wrapper (800ms limit to prevent any network/permission hanging)
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number = 800, fallbackValue: T): Promise<T> {
@@ -554,3 +565,253 @@ export async function getAuditLogs(): Promise<AuditLog[]> {
   }
   return getLocalAuditLogs();
 }
+
+// -------------------------------------------------------------
+// EVENTS / PROGRAM TIMELINE MODULE
+// -------------------------------------------------------------
+
+function formatYMD(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function addDays(base: Date, days: number): Date {
+  const res = new Date(base);
+  res.setDate(res.getDate() + days);
+  return res;
+}
+
+export function computeEventStatus(startDate: string, endDate: string, override?: EventStatus): EventStatus {
+  if (override) return override;
+  const today = formatYMD(new Date());
+  if (endDate < today) return "सम्पन्न";
+  if (startDate <= today && today <= endDate) return "चल रहा है";
+  return "आगामी";
+}
+
+function generateInitialSampleEvents(): EventItem[] {
+  const now = new Date();
+  return [
+    {
+      id: "event-sample-1",
+      title: "51,000 पार्थिव शिवलिंग निर्माण एवं महारुद्राभिषेक",
+      category: "अनुष्ठान",
+      startDate: formatYMD(addDays(now, -2)),
+      endDate: formatYMD(addDays(now, 7)),
+      timing: "प्रातः 8:00 से 12:00 एवं सायं 4:00 से 7:00 बजे",
+      location: "बृजविहारी गौ तीर्थ धाम, मुख्य यज्ञशाला",
+      city: "वृंदावन",
+      organizerName: "बृजविहारी गौ सेवा न्यास",
+      organizerPhone: "9826012345",
+      description: "51,000 दिव्य पार्थिव शिवलिंगों का निर्माण, नित्य महारुद्राभिषेक एवं 108 विप्रवरों द्वारा वेद मंत्रोच्चार।",
+      isSpecial: true,
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: "event-sample-2",
+      title: "श्रीमद्भागवत कथा सप्ताह ज्ञान महायज्ञ",
+      category: "कथा",
+      startDate: formatYMD(addDays(now, 10)),
+      endDate: formatYMD(addDays(now, 16)),
+      timing: "दोपहर 2:30 से सायं 6:30 बजे",
+      location: "कथा पांडाल, श्री राम मंदिर परिसर",
+      city: "इंदौर",
+      organizerName: "श्री राजेश भाई पटेल एवं परिवार",
+      organizerPhone: "9712033445",
+      description: "पूज्य गुरुजी के श्रीमुख से 7 दिवसीय संगीतमय श्रीमद्भागवत कथा। श्रीकृष्ण जन्मोत्सव एवं गोवर्धन पूजा विशेष उत्सव।",
+      isSpecial: true,
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: "event-sample-3",
+      title: "गोपाष्टमी महोत्सव एवं विशाल गौ पूजन भण्डारा",
+      category: "उत्सव",
+      startDate: formatYMD(addDays(now, 24)),
+      endDate: formatYMD(addDays(now, 25)),
+      timing: "प्रातः 9:00 बजे से निरंतर",
+      location: "सुरभि गौशाला प्रांगण, बृजविहारी धाम",
+      city: "वृंदावन",
+      organizerName: "समस्त गौ भक्त मंडल",
+      organizerPhone: "9425098765",
+      description: "सैकड़ों देशी गौमाताओं का सविधि पूजन, छप्पन भोग, महाआरती एवं संतों-भक्तों का महाप्रसाद भण्डारा।",
+      isSpecial: false,
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: "event-sample-4",
+      title: "श्री राम कथा एवं विराट मानस सम्मेलन",
+      category: "कथा",
+      startDate: formatYMD(addDays(now, 40)),
+      endDate: formatYMD(addDays(now, 48)),
+      timing: "सायं 4:00 से रात्रि 8:00 बजे",
+      location: "सिंहस्थ पांडाल, शिप्रा तट",
+      city: "उज्जैन",
+      organizerName: "महाकाल सेवा समिति",
+      organizerPhone: "9893044556",
+      description: "9 दिवसीय नवाह्न पारायण श्री राम कथा एवं दिव्य संकीर्तन।",
+      isSpecial: true,
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: "event-sample-5",
+      title: "श्री शिव महापुराण कथा एवं द्वादश ज्योतिर्लिंग अर्चन",
+      category: "कथा",
+      startDate: formatYMD(addDays(now, -25)),
+      endDate: formatYMD(addDays(now, -18)),
+      timing: "प्रातः 10:00 से दोपहर 2:00 बजे",
+      location: "ओंकारेश्वर ज्योतिर्लिंग परिक्षेत्र",
+      city: "ओंकारेश्वर",
+      organizerName: "नर्मदा सेवा संघ",
+      organizerPhone: "9982055667",
+      description: "श्रावण मास विशेष शिव महापुराण कथा एवं नर्मदा तट पर महाआरती।",
+      isSpecial: false,
+      createdAt: new Date().toISOString(),
+    },
+  ];
+}
+
+// Local storage reader for events
+export function getLocalEvents(): EventItem[] {
+  if (typeof window === "undefined") return generateInitialSampleEvents();
+  try {
+    const data = localStorage.getItem(EVENTS_STORAGE_KEY);
+    if (!data) {
+      const initial = generateInitialSampleEvents();
+      localStorage.setItem(EVENTS_STORAGE_KEY, JSON.stringify(initial));
+      return initial;
+    }
+    return JSON.parse(data);
+  } catch {
+    return generateInitialSampleEvents();
+  }
+}
+
+// Local storage writer for events
+export function setLocalEvents(events: EventItem[]) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(EVENTS_STORAGE_KEY, JSON.stringify(events));
+  } catch (e) {
+    console.error("Local events storage error:", e);
+  }
+}
+
+// Fetch all events (Local immediate + Firestore background sync)
+export async function getEvents(): Promise<EventItem[]> {
+  let allEvents = getLocalEvents();
+
+  if (isFirebaseConfigured && db) {
+    try {
+      const fetchEventsFirestore = async () => {
+        const snap = await getDocs(collection(db!, "events"));
+        if (!snap.empty) {
+          const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as EventItem));
+          // Save to local storage for offline speed
+          setLocalEvents(list);
+          return list;
+        }
+        return getLocalEvents();
+      };
+      allEvents = await withTimeout(fetchEventsFirestore(), 800, getLocalEvents());
+    } catch {
+      allEvents = getLocalEvents();
+    }
+  }
+
+  // Sort events: Ongoing first, then upcoming ascending by startDate, then past descending
+  return allEvents.sort((a, b) => {
+    return new Date(a.startDate).getTime() - new Date(b.startDate).getTime();
+  });
+}
+
+// Add a new event
+export async function addEvent(eventData: Omit<EventItem, "id" | "createdAt">): Promise<EventItem> {
+  const createdAt = new Date().toISOString();
+  const all = getLocalEvents();
+  const eventId = `event-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+  
+  const newEvent: EventItem = {
+    ...eventData,
+    id: eventId,
+    createdAt,
+  };
+
+  all.unshift(newEvent);
+  setLocalEvents(all);
+
+  // Background Firestore Sync
+  if (isFirebaseConfigured && db) {
+    (async () => {
+      try {
+        const docRef = doc(collection(db!, "events"));
+        await setDoc(docRef, {
+          ...newEvent,
+          id: docRef.id,
+          createdAt: serverTimestamp(),
+        });
+      } catch (err) {
+        console.warn("Background Firestore event sync notice:", err);
+      }
+    })();
+  }
+
+  return newEvent;
+}
+
+// Update existing event
+export async function updateEvent(eventId: string, updatedData: Partial<EventItem>): Promise<EventItem> {
+  const timestamp = new Date().toISOString();
+  const all = getLocalEvents();
+  const index = all.findIndex(e => e.id === eventId);
+  if (index === -1) throw new Error("Event not found");
+
+  const merged: EventItem = {
+    ...all[index],
+    ...updatedData,
+    updatedAt: timestamp,
+  };
+
+  all[index] = merged;
+  setLocalEvents(all);
+
+  // Background Firestore Sync
+  if (isFirebaseConfigured && db) {
+    (async () => {
+      try {
+        const docRef = doc(db!, "events", eventId);
+        await updateDoc(docRef, {
+          ...updatedData,
+          updatedAt: serverTimestamp(),
+        });
+      } catch (e) {
+        console.warn("Background event update notice:", e);
+      }
+    })();
+  }
+
+  return merged;
+}
+
+// Delete event
+export async function deleteEvent(eventId: string): Promise<boolean> {
+  const all = getLocalEvents();
+  const filtered = all.filter(e => e.id !== eventId);
+  setLocalEvents(filtered);
+
+  // Background Firestore Sync
+  if (isFirebaseConfigured && db) {
+    (async () => {
+      try {
+        const docRef = doc(db!, "events", eventId);
+        await deleteDoc(docRef);
+      } catch (e) {
+        console.warn("Background event delete notice:", e);
+      }
+    })();
+  }
+
+  return true;
+}
+

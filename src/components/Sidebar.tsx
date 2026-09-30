@@ -8,7 +8,8 @@ import {
   UploadCloud, 
   Download, 
   History, 
-  PlusCircle 
+  PlusCircle,
+  CalendarDays
 } from "lucide-react";
 
 interface Props {
@@ -16,13 +17,15 @@ interface Props {
   onNavigate: (tab: string) => void;
   onOpenAddModal: () => void;
   totalEntriesCount?: number;
+  upcomingEventsCount?: number;
 }
 
 export const Sidebar: React.FC<Props> = ({ 
   activeTab, 
   onNavigate, 
   onOpenAddModal,
-  totalEntriesCount = 0 
+  totalEntriesCount = 0,
+  upcomingEventsCount = 0
 }) => {
   const navItems = [
     {
@@ -31,6 +34,14 @@ export const Sidebar: React.FC<Props> = ({
       desktopLabel: "मुख्य डैशबोर्ड",
       sublabel: "Overview",
       icon: LayoutDashboard,
+    },
+    {
+      id: "events",
+      label: "कार्यक्रम",
+      desktopLabel: "कार्यक्रम टाइमलाइन",
+      sublabel: "Events Schedule",
+      icon: CalendarDays,
+      badge: upcomingEventsCount > 0 ? upcomingEventsCount.toString() : undefined,
     },
     {
       id: "records",
@@ -47,6 +58,7 @@ export const Sidebar: React.FC<Props> = ({
       sublabel: "Devotees",
       icon: Users,
     },
+
     {
       id: "import",
       label: "इम्पोर्ट",

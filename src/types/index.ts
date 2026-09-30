@@ -64,3 +64,25 @@ export interface ImportPreviewRow {
   errors: string[];
   isDuplicate?: boolean;
 }
+
+export type EventCategory = 'कथा' | 'अनुष्ठान' | 'उत्सव' | 'भण्डारा' | 'यात्रा' | 'बैठक' | 'अन्य';
+export type EventStatus = 'चल रहा है' | 'आगामी' | 'सम्पन्न';
+
+export interface EventItem {
+  id: string;
+  title: string;
+  category: EventCategory;
+  startDate: string; // YYYY-MM-DD
+  endDate: string;   // YYYY-MM-DD
+  timing?: string;   // e.g. "दोपहर 2:00 से सायं 6:00 बजे"
+  location: string;  // e.g. "बृजविहारी गौ तीर्थ धाम, मुख्य पांडाल"
+  city: string;      // e.g. "वृंदावन"
+  organizerName?: string;
+  organizerPhone?: string;
+  description?: string;
+  isSpecial?: boolean;
+  statusOverride?: EventStatus; // Optional manual override
+  createdAt: string;
+  updatedAt?: string;
+}
+

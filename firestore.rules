@@ -12,6 +12,9 @@ service cloud.firestore {
     match /auditLogs/{auditId} {
       allow read, write: if true;
     }
+    match /events/{eventId} {
+      allow read, write: if true;
+    }
     match /meta/{metaId} {
       allow read, write: if true;
     }

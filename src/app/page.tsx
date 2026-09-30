@@ -9,11 +9,12 @@ import { DevoteeDirectory } from "@/components/DevoteeDirectory";
 import { ExcelImportView } from "@/components/ExcelImportView";
 import { ExportUtility } from "@/components/ExportUtility";
 import { AuditLogView } from "@/components/AuditLogView";
+import { EventsView } from "@/components/EventsView";
 import { AddEntryModal } from "@/components/AddEntryModal";
 import { CorrectionModal } from "@/components/CorrectionModal";
 import { ReceiptModal } from "@/components/ReceiptModal";
-import { DashboardStats, DonationEntry } from "@/types";
-import { getDashboardStats, getDonationRecords } from "@/lib/db";
+import { DashboardStats, DonationEntry, EventItem } from "@/types";
+import { getDashboardStats, getDonationRecords, getEvents, computeEventStatus } from "@/lib/db";
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<string>("dashboard");
@@ -31,6 +32,7 @@ export default function Home() {
   });
 
   const [recentEntries, setRecentEntries] = useState<DonationEntry[]>([]);
+  const [events, setEvents] = useState<EventItem[]>([]);
 
   // Modals state
   const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
@@ -38,7 +40,7 @@ export default function Home() {
   const [receiptEntry, setReceiptEntry] = useState<DonationEntry | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState<number>(0);
 
-  // Load stats and recent entries
+  // Load stats, recent entries, and events
   const loadDashboardData = async () => {
     try {
       const s = await getDashboardStats();
@@ -46,10 +48,14 @@ export default function Home() {
 
       const r = await getDonationRecords({ pageSize: 5, sortBy: "dateDesc" });
       setRecentEntries(r.data);
+
+      const evs = await getEvents();
+      setEvents(evs);
     } catch (err) {
       console.error("Failed to load dashboard data:", err);
     }
   };
+
 
   useEffect(() => {
     loadDashboardData();
@@ -62,6 +68,10 @@ export default function Home() {
   const handleCorrectionComplete = (updatedEntry: DonationEntry) => {
     setRefreshTrigger((prev) => prev + 1);
   };
+
+  const upcomingEventsCount = events.filter(
+    (ev) => computeEventStatus(ev.startDate, ev.endDate, ev.statusOverride) !== "सम्पन्न"
+  ).length;
 
   return (
     <div className="min-h-screen bg-[#FAF7F2] text-stone-950 flex flex-col font-sans selection:bg-[#D84315] selection:text-white">
@@ -82,6 +92,7 @@ export default function Home() {
           onNavigate={(tab) => setActiveTab(tab)}
           onOpenAddModal={() => setIsAddModalOpen(true)}
           totalEntriesCount={stats.totalEntries}
+          upcomingEventsCount={upcomingEventsCount}
         />
 
         {/* Dynamic Main View Pane */}
@@ -90,10 +101,15 @@ export default function Home() {
             <DashboardView
               stats={stats}
               recentEntries={recentEntries}
+              events={events}
               onOpenAddModal={() => setIsAddModalOpen(true)}
               onNavigate={(tab) => setActiveTab(tab)}
               onSelectEntry={(entry) => setReceiptEntry(entry)}
             />
+          )}
+
+          {activeTab === "events" && (
+            <EventsView onRefreshStats={loadDashboardData} />
           )}
 
           {activeTab === "records" && (
@@ -104,6 +120,7 @@ export default function Home() {
               refreshTrigger={refreshTrigger}
             />
           )}
+
 
           {activeTab === "devotees" && <DevoteeDirectory />}
 
