@@ -278,10 +278,10 @@ export async function addDonationEntry(entryData: Omit<DonationEntry, "id" | "cr
   if (isFirebaseConfigured && db) {
     (async () => {
       try {
-        const docRef = doc(collection(db!, "donations"));
+        const docRef = doc(db!, "donations", recordId);
         await setDoc(docRef, {
           ...newRecord,
-          id: docRef.id,
+          id: recordId,
           createdAt: serverTimestamp(),
         });
 
@@ -718,10 +718,22 @@ export async function getEvents(): Promise<EventItem[]> {
           // Save to local storage for offline speed
           setLocalEvents(list);
           return list;
+        } else if (allEvents.length > 0) {
+          // If Firestore is empty, seed existing local events to Firestore
+          try {
+            for (const ev of allEvents) {
+              await setDoc(doc(db!, "events", ev.id), {
+                ...ev,
+                createdAt: ev.createdAt || serverTimestamp(),
+              }, { merge: true });
+            }
+          } catch (syncErr) {
+            console.warn("Initial events sync to Firestore notice:", syncErr);
+          }
         }
         return getLocalEvents();
       };
-      allEvents = await withTimeout(fetchEventsFirestore(), 800, getLocalEvents());
+      allEvents = await withTimeout(fetchEventsFirestore(), 1500, getLocalEvents());
     } catch {
       allEvents = getLocalEvents();
     }
@@ -748,18 +760,19 @@ export async function addEvent(eventData: Omit<EventItem, "id" | "createdAt">): 
   all.unshift(newEvent);
   setLocalEvents(all);
 
-  // Background Firestore Sync
+  // Firestore Sync - directly save to Firestore using matching eventId
   if (isFirebaseConfigured && db) {
     (async () => {
       try {
-        const docRef = doc(collection(db!, "events"));
+        const docRef = doc(db!, "events", eventId);
         await setDoc(docRef, {
           ...newEvent,
-          id: docRef.id,
+          id: eventId,
           createdAt: serverTimestamp(),
         });
+        console.log("Event successfully stored in Firestore:", eventId);
       } catch (err) {
-        console.warn("Background Firestore event sync notice:", err);
+        console.warn("Firestore event sync notice:", err);
       }
     })();
   }
@@ -783,17 +796,18 @@ export async function updateEvent(eventId: string, updatedData: Partial<EventIte
   all[index] = merged;
   setLocalEvents(all);
 
-  // Background Firestore Sync
+  // Firestore Sync - safely merge into Firestore
   if (isFirebaseConfigured && db) {
     (async () => {
       try {
         const docRef = doc(db!, "events", eventId);
-        await updateDoc(docRef, {
-          ...updatedData,
+        await setDoc(docRef, {
+          ...merged,
           updatedAt: serverTimestamp(),
-        });
+        }, { merge: true });
+        console.log("Event successfully updated in Firestore:", eventId);
       } catch (e) {
-        console.warn("Background event update notice:", e);
+        console.warn("Firestore event update notice:", e);
       }
     })();
   }
@@ -807,14 +821,15 @@ export async function deleteEvent(eventId: string): Promise<boolean> {
   const filtered = all.filter(e => e.id !== eventId);
   setLocalEvents(filtered);
 
-  // Background Firestore Sync
+  // Firestore Sync - delete matching document in Firestore
   if (isFirebaseConfigured && db) {
     (async () => {
       try {
         const docRef = doc(db!, "events", eventId);
         await deleteDoc(docRef);
+        console.log("Event successfully deleted from Firestore:", eventId);
       } catch (e) {
-        console.warn("Background event delete notice:", e);
+        console.warn("Firestore event delete notice:", e);
       }
     })();
   }
@@ -985,10 +1000,22 @@ export async function getAshramDonations(options?: {
           const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as AshramDaanEntry));
           setLocalAshramDonations(list);
           return list;
+        } else if (all.length > 0) {
+          // If Firestore is empty, attempt initial seed of local records
+          try {
+            for (const item of all) {
+              await setDoc(doc(db!, "ashramDonations", item.id), {
+                ...item,
+                createdAt: item.createdAt || serverTimestamp(),
+              }, { merge: true });
+            }
+          } catch {
+            // will silently await until rules are published
+          }
         }
         return getLocalAshramDonations();
       };
-      all = await withTimeout(fetchFirestore(), 800, getLocalAshramDonations());
+      all = await withTimeout(fetchFirestore(), 1500, getLocalAshramDonations());
     } catch {
       all = getLocalAshramDonations();
     }
@@ -1036,21 +1063,22 @@ export async function addAshramDonation(entryData: Omit<AshramDaanEntry, "id" | 
     localStorage.setItem(ASHRAM_COUNTER_KEY, numOnly.toString());
   }
 
-  // Background Firestore Sync
+  // Firestore Sync - store directly into Firestore with matching id
   if (isFirebaseConfigured && db) {
     (async () => {
       try {
-        const docRef = doc(collection(db!, "ashramDonations"));
+        const docRef = doc(db!, "ashramDonations", id);
         await setDoc(docRef, {
           ...newRecord,
-          id: docRef.id,
+          id,
           createdAt: serverTimestamp(),
         });
         if (!isNaN(numOnly)) {
           await setDoc(doc(db!, "meta", "counters"), { lastAshramReceiptNumber: numOnly }, { merge: true });
         }
+        console.log("Ashram donation successfully stored in Firestore:", id);
       } catch (err) {
-        console.warn("Background Ashram donation sync notice:", err);
+        console.warn("Firestore Ashram donation sync notice:", err);
       }
     })();
   }
@@ -1073,16 +1101,18 @@ export async function updateAshramDonation(id: string, updatedData: Partial<Ashr
   all[index] = merged;
   setLocalAshramDonations(all);
 
+  // Firestore Sync - safely merge into Firestore
   if (isFirebaseConfigured && db) {
     (async () => {
       try {
         const docRef = doc(db!, "ashramDonations", id);
-        await updateDoc(docRef, {
-          ...updatedData,
+        await setDoc(docRef, {
+          ...merged,
           updatedAt: serverTimestamp(),
-        });
+        }, { merge: true });
+        console.log("Ashram donation successfully updated in Firestore:", id);
       } catch (e) {
-        console.warn("Background Ashram update notice:", e);
+        console.warn("Firestore Ashram update notice:", e);
       }
     })();
   }
@@ -1095,13 +1125,15 @@ export async function deleteAshramDonation(id: string): Promise<boolean> {
   const filtered = all.filter(d => d.id !== id);
   setLocalAshramDonations(filtered);
 
+  // Firestore Sync - delete matching document in Firestore
   if (isFirebaseConfigured && db) {
     (async () => {
       try {
         const docRef = doc(db!, "ashramDonations", id);
         await deleteDoc(docRef);
+        console.log("Ashram donation successfully deleted from Firestore:", id);
       } catch (e) {
-        console.warn("Background Ashram delete notice:", e);
+        console.warn("Firestore Ashram delete notice:", e);
       }
     })();
   }
