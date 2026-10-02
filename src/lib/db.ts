@@ -56,6 +56,35 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number = 800, fallbackVa
   ]);
 }
 
+/**
+ * Recursively remove `undefined` values from an object before writing to Firestore,
+ * preserving Firestore FieldValues (such as serverTimestamp(), deleteField()) and Timestamps.
+ * Firestore strictly forbids `undefined` anywhere in document payloads.
+ */
+export function sanitizeForFirestore<T>(data: T): T {
+  if (data === null || data === undefined) {
+    return data;
+  }
+  if (Array.isArray(data)) {
+    return data
+      .filter((item) => item !== undefined)
+      .map((item) => sanitizeForFirestore(item)) as unknown as T;
+  }
+  if (typeof data === "object" && !(data instanceof Date)) {
+    if (typeof (data as any).toMillis === "function" || "_methodName" in (data as any)) {
+      return data;
+    }
+    const sanitized: Record<string, any> = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (value !== undefined) {
+        sanitized[key] = sanitizeForFirestore(value);
+      }
+    }
+    return sanitized as T;
+  }
+  return data;
+}
+
 // Authentic realistic sample data for initial setup if empty
 const INITIAL_SAMPLE_DONATIONS: DonationEntry[] = [
   {
@@ -279,11 +308,11 @@ export async function addDonationEntry(entryData: Omit<DonationEntry, "id" | "cr
     (async () => {
       try {
         const docRef = doc(db!, "donations", recordId);
-        await setDoc(docRef, {
+        await setDoc(docRef, sanitizeForFirestore({
           ...newRecord,
           id: recordId,
           createdAt: serverTimestamp(),
-        });
+        }));
 
         if (!isNaN(numOnly)) {
           await setDoc(doc(db!, "meta", "counters"), { lastEntryNumber: numOnly }, { merge: true });
@@ -320,11 +349,11 @@ export async function importBatchDonations(entries: Omit<DonationEntry, "id" | "
 
           chunk.forEach(item => {
             const docRef = doc(collection(db!, "donations"));
-            batch.set(docRef, {
+            batch.set(docRef, sanitizeForFirestore({
               ...item,
               id: docRef.id,
               createdAt: item.createdAt
-            });
+            }));
           });
 
           await batch.commit();
@@ -377,17 +406,17 @@ export async function applyCorrection(
     (async () => {
       try {
         const docRef = doc(db!, "donations", donationId);
-        await updateDoc(docRef, {
+        await updateDoc(docRef, sanitizeForFirestore({
           ...updatedData,
           updatedAt: serverTimestamp()
-        });
+        }));
 
         const auditRef = doc(collection(db!, "auditLogs"));
-        await setDoc(auditRef, {
+        await setDoc(auditRef, sanitizeForFirestore({
           ...auditRecord,
           id: auditRef.id,
           timestamp: serverTimestamp()
-        });
+        }));
       } catch (e) {
         console.warn("Background correction sync notice:", e);
       }
@@ -722,10 +751,10 @@ export async function getEvents(): Promise<EventItem[]> {
           // If Firestore is empty, seed existing local events to Firestore
           try {
             for (const ev of allEvents) {
-              await setDoc(doc(db!, "events", ev.id), {
+              await setDoc(doc(db!, "events", ev.id), sanitizeForFirestore({
                 ...ev,
                 createdAt: ev.createdAt || serverTimestamp(),
-              }, { merge: true });
+              }), { merge: true });
             }
           } catch (syncErr) {
             console.warn("Initial events sync to Firestore notice:", syncErr);
@@ -765,11 +794,11 @@ export async function addEvent(eventData: Omit<EventItem, "id" | "createdAt">): 
     (async () => {
       try {
         const docRef = doc(db!, "events", eventId);
-        await setDoc(docRef, {
+        await setDoc(docRef, sanitizeForFirestore({
           ...newEvent,
           id: eventId,
           createdAt: serverTimestamp(),
-        });
+        }));
         console.log("Event successfully stored in Firestore:", eventId);
       } catch (err) {
         console.warn("Firestore event sync notice:", err);
@@ -801,10 +830,10 @@ export async function updateEvent(eventId: string, updatedData: Partial<EventIte
     (async () => {
       try {
         const docRef = doc(db!, "events", eventId);
-        await setDoc(docRef, {
+        await setDoc(docRef, sanitizeForFirestore({
           ...merged,
           updatedAt: serverTimestamp(),
-        }, { merge: true });
+        }), { merge: true });
         console.log("Event successfully updated in Firestore:", eventId);
       } catch (e) {
         console.warn("Firestore event update notice:", e);
@@ -998,16 +1027,34 @@ export async function getAshramDonations(options?: {
         const snap = await getDocs(collection(db!, "ashramDonations"));
         if (!snap.empty) {
           const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as AshramDaanEntry));
-          setLocalAshramDonations(list);
-          return list;
+          const firestoreIds = new Set(list.map(item => item.id));
+
+          // Re-sync any local items that failed to sync earlier
+          const unsynced = all.filter(localItem => !firestoreIds.has(localItem.id));
+          if (unsynced.length > 0) {
+            for (const item of unsynced) {
+              try {
+                await setDoc(doc(db!, "ashramDonations", item.id), sanitizeForFirestore({
+                  ...item,
+                  createdAt: item.createdAt || serverTimestamp(),
+                }), { merge: true });
+              } catch (syncNotice) {
+                console.warn("Unsynced ashram donation sync notice:", syncNotice);
+              }
+            }
+          }
+
+          const combined = [...unsynced, ...list];
+          setLocalAshramDonations(combined);
+          return combined;
         } else if (all.length > 0) {
           // If Firestore is empty, attempt initial seed of local records
           try {
             for (const item of all) {
-              await setDoc(doc(db!, "ashramDonations", item.id), {
+              await setDoc(doc(db!, "ashramDonations", item.id), sanitizeForFirestore({
                 ...item,
                 createdAt: item.createdAt || serverTimestamp(),
-              }, { merge: true });
+              }), { merge: true });
             }
           } catch {
             // will silently await until rules are published
@@ -1068,11 +1115,11 @@ export async function addAshramDonation(entryData: Omit<AshramDaanEntry, "id" | 
     (async () => {
       try {
         const docRef = doc(db!, "ashramDonations", id);
-        await setDoc(docRef, {
+        await setDoc(docRef, sanitizeForFirestore({
           ...newRecord,
           id,
           createdAt: serverTimestamp(),
-        });
+        }));
         if (!isNaN(numOnly)) {
           await setDoc(doc(db!, "meta", "counters"), { lastAshramReceiptNumber: numOnly }, { merge: true });
         }
@@ -1106,10 +1153,10 @@ export async function updateAshramDonation(id: string, updatedData: Partial<Ashr
     (async () => {
       try {
         const docRef = doc(db!, "ashramDonations", id);
-        await setDoc(docRef, {
+        await setDoc(docRef, sanitizeForFirestore({
           ...merged,
           updatedAt: serverTimestamp(),
-        }, { merge: true });
+        }), { merge: true });
         console.log("Ashram donation successfully updated in Firestore:", id);
       } catch (e) {
         console.warn("Firestore Ashram update notice:", e);
